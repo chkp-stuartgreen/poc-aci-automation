@@ -1,0 +1,50 @@
+---
+- name: Add a new EPG and rule to the policy
+  hosts: chkpmds
+  gather_facts: no
+  tasks:
+    - name:
+      raw: 'mgmt_cli -r true add data-center-object data-center-name {{ dc_object }} uid-in-data-center "{{ dc_uri_new_obj }}" --domain {{ new_domain }} --format json 2> /dev/null | jq -r .name'
+      register: dc_obj_name
+
+- name: Add this to a rule
+  gather_facts: no
+  connection: httpapi
+  hosts: chkpmds
+  vars:
+    ansible_ssh_user:
+    ansible_ssh_pass:
+    ansible_ssh_common_args:
+  tasks:
+    - name: Create rule with new object
+      check_point.mgmt.cp_mgmt_access_rule:
+        auto_publish_session: true
+        layer: Network
+        name: New EPG rule
+        position: 1
+        service:
+        - any
+        source:
+        - '{{ dc_obj_name.stdout }}'
+        destination:
+        - any
+        action: Accept
+        track:
+          type: Log
+        state: present
+
+- name: Install policy
+  hosts: chkpmds
+  gather_facts: no
+  connection: httpapi
+  vars:
+    ansible_ssh_pass:
+    ansible_ssh_user:
+  tasks:
+    - name: Install to new VS
+      check_point.mgmt.cp_mgmt_install_policy:
+        access: true
+        policy_package: standard
+        targets:
+          - "{{ vs_name }}"
+

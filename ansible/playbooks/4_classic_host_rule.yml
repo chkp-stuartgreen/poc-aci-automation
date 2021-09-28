@@ -1,0 +1,35 @@
+---
+- name: Create a rule with classic hosts approach
+  connection: httpapi
+  gather_facts: no
+  hosts: chkpmds
+  vars:
+    ansible_ssh_user:
+    ansible_ssh_pass:
+    ansible_ssh_common_args:
+
+  tasks:
+    - name: Create a basic host
+      check_point.mgmt.cp_mgmt_host:
+        ip_address: '{{ new_host_ip }}'
+        name: '{{ new_host_name }}'
+        state: present
+
+    - name: Create a rule using the new host
+      check_point.mgmt.cp_mgmt_access_rule:
+        auto_publish_session: true
+        layer: Network
+        name: Classic host rule
+        position: top
+        service:
+        - icmp-proto
+        source:
+        - '{{ new_host_name }}'
+        destination:
+        - any
+        action: Accept
+        track:
+          type: Log
+        state: present
+
+

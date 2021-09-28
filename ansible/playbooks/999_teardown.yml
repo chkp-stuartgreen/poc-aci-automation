@@ -1,0 +1,10 @@
+---
+
+- name: Delete VS and DMS
+  hosts: chkpmds
+  gather_facts: no
+  tasks:
+    - name: Deleting VS from domain
+      raw: 'mdsenv {{new_domain}}_Server; vsx_provisioning_tool -s localhost -u {{mds_user}} -p {{mds_password}} -o remove vd name {{ vs_name }}'
+    - name: Delete domain
+      raw: 'mgmt_cli -r true delete domain name {{ new_domain }} --format json'

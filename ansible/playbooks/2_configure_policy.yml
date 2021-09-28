@@ -1,0 +1,188 @@
+---
+- name: Configure objects for DC and EPGs
+  hosts: chkpmds
+  gather_facts: no
+  tasks:
+    - name: Create APIC objects in new domain
+      raw:  'mgmt_cli -r true add data-center-server name {{ dc_object }} type aci username {{ apic_user_name}} password {{ apic_password }} urls.1 "{{ apic_url }}" unsafe-auto-accept true ignore-warnings true --domain {{ new_domain }}'
+    - name: Create DC Object for APIC EPG 1
+      raw: 'mgmt_cli -r true add data-center-object data-center-name {{ dc_object }} uid-in-data-center "{{ dc_uri_obj_1 }}" --domain {{ new_domain }}'
+    - name: Create DC Object for APIC EPG 2
+      raw: 'mgmt_cli -r true add data-center-object data-center-name {{ dc_object }} uid-in-data-center "{{ dc_uri_obj_2 }}" --domain {{ new_domain }}'
+
+- name: Configure policy rules
+  hosts: chkpmds
+  gather_facts: no
+  tasks:
+    - name: Retrieve name for EPG1 object in policy
+      raw: 'mgmt_cli -r true show data-center-content data-center-name {{ dc_object }} uid-in-data-center {{dc_uri_obj_1}} --domain {{ new_domain }} --format json| jq -r .objects[0].name'
+      register: dc_uri_obj_1_name
+
+    - name: Retrieve name for EPG2 object in policy
+      raw: 'mgmt_cli -r true show data-center-content data-center-name {{ dc_object }} uid-in-data-center {{dc_uri_obj_2}} --domain {{ new_domain }} --format json| jq -r .objects[0].name'
+      register: dc_uri_obj_2_name
+
+- name: Create localhost object for IDA whitelist
+  hosts: chkpmds
+  gather_facts: no
+  connection: httpapi
+  vars:
+    ansible_ssh_user:
+    ansible_ssh_pass:
+    ansible_ssh_common_args:
+  tasks:
+    - name: Create cloudguard_local object
+      check_point.mgmt.cp_mgmt_host:
+        auto_publish_session: true
+        name: cloudguard_local
+        ipv4_address: 127.0.0.1
+        state: present
+
+- name: Use CP API to edit rules
+  gather_facts: no
+  hosts: chkpmds
+  connection: httpapi
+  vars:
+    ansible_ssh_user:
+    ansible_ssh_pass:
+    ansible_ssh_common_args:
+  tasks:
+    - name: Create rule for EPG1
+      check_point.mgmt.cp_mgmt_access_rule:
+        auto_publish_session: true
+        layer: Network
+        name: Access for EPG1
+        position: 1
+        service: 
+        - any
+        source:
+        - '{{ dc_uri_obj_1_name.stdout}}'
+        destination:
+        - any
+        action: Accept
+        track:
+          type: Log
+        state: present
+
+    - name: Create rule for EPG2
+      check_point.mgmt.cp_mgmt_access_rule:
+        auto_publish_session: true
+        layer: Network
+        name: Access for EPG2
+        position: 2
+        service:
+        - any
+        source:
+        - '{{ dc_uri_obj_2_name.stdout}}'
+        destination:
+        - any
+        action: Accept
+        track:
+          type: Log
+        state: present
+
+- name: Configure Identity Awareness
+  gather_facts: no
+  hosts: chkpmds
+  connection: httpapi
+  vars:
+    ansible_ssh_user:
+    ansible_ssh_pass:
+  tasks:
+    - name: get localhost object UID
+      check_point.mgmt.cp_mgmt_host_facts:
+        name: cloudguard_local
+
+    - name: get FW obj UID
+      check_point.mgmt.checkpoint_object_facts:
+        object_filter: "{{ vs_name }}"
+
+
+
+    - name: UID for VS_1
+      ansible.builtin.debug:
+        var: ansible_facts.checkpoint_objects.objects.0.uid
+        verbosity: 2
+
+    - name: UID for localhost obj
+      ansible.builtin.debug:
+        var: ansible_facts.host.uid
+        verbosity: 2
+
+- name: Get login SID
+  hosts: chkpmds
+  gather_facts: no
+  tasks:
+    - name: get web services token
+      uri:
+        url: 'https://{{ new_domain_ip }}/web_api/v1.7/login'
+        method: POST
+        body_format: json
+        body:
+          api-key: "{{ api_key }}"
+          domain: "{{ new_domain }}"
+        validate_certs: no
+      register: login_token_details
+
+    - name: output login
+      debug:
+        var: login_token_details
+        verbosity: 2
+
+    - name: Set properties of IA object
+      uri:
+        url: 'https://{{ new_domain_ip }}/web_api/v1.7/set-generic-object'
+        method: POST
+        body_format: json
+        headers:
+          X-chkp-sid: "{{ login_token_details.json.sid }}"
+        validate_certs: no
+        body: '{"uid":"{{ ansible_facts.checkpoint_objects.objects.0.uid }}","identityAwareBlade":{"create":"com.checkpoint.objects.classes.dummy.CpmiIdentityAwareBlade","owned-object":{"idaApiSettings":{"idaApiClientVerificationSettings":[]},"enableIdaApi":"True","idcSettings":[],"isCollectingIdentities":"True","identityAwareBladeInstalled":"INSTALLED"}}}'
+
+    - name: Set properties of IA object
+      uri:
+        url: 'https://{{ new_domain_ip }}/web_api/v1.7/set-generic-object'
+        method: POST
+        body_format: json
+        headers:
+          X-chkp-sid: "{{ login_token_details.json.sid }}"
+        validate_certs: no
+        body: '{"uid":"{{ ansible_facts.checkpoint_objects.objects.0.uid }}","identityAwareBlade":{"idaApiSettings":{"idaApiClientVerificationSettings":[{"create":"com.checkpoint.objects.identity_awareness_classes.dummy.CpmiIdentityAwareClientVerificationEntry","owned-object":{"preSharedSecret":"sausage123","whiteListClient":"{{ ansible_facts.host.uid }}"}}]}}}'
+
+    - name: Publish session
+      uri:
+        url: 'https://{{ new_domain_ip }}/web_api/v1.7/publish'
+        method: POST
+        headers:
+          X-chkp-sid: "{{ login_token_details.json.sid }}"
+        validate_certs: no
+        body_format: json
+        body: "{}"
+- name: Create dummy route to push config to VS via CLI
+  gather_facts: no
+  hosts: chkpmds
+  tasks:
+    - name: Push fake route
+      raw: 'mdsenv {{ new_domain }}_Server; vsx_provisioning_tool -s localhost -u {{ mds_user }} -p {{ mds_password }} -o add route vd {{ vs_name }} destination 99.99.99.99/32 next_hop 192.168.1.254'
+
+- name: Remove dummy route
+  gather_facts: no
+  hosts: chkpmds
+  tasks:
+    - name: remove vs fake route
+      raw: 'mdsenv {{ new_domain }}_Server; vsx_provisioning_tool -s localhost -u {{ mds_user }} -p {{ mds_password }} -o remove route vd {{ vs_name }} destination 99.99.99.99/32'
+
+- name: Install policy
+  hosts: chkpmds
+  gather_facts: no
+  connection: httpapi
+  vars:
+    ansible_ssh_pass:
+    ansible_ssh_user:
+  tasks:
+    - name: Install to new VS
+      check_point.mgmt.cp_mgmt_install_policy:
+        access: true
+        policy_package: standard
+        targets:
+          - "{{ vs_name }}"

@@ -1,0 +1,44 @@
+---
+stages:
+  - step1_create_domain_and_vs
+  - step2_create_dc_objects
+  - step3_create_dynamic_rules
+  - step4_create_static_rule
+  - step999_teardown
+
+step1_create_domain_and_vs:
+  stage: step1_create_domain_and_vs
+  when: manual
+  allow_failure: false
+  script:
+    - ansible-playbook -i ansible/hosts ansible/playbooks/1_create_mds_vs.yml -e "$CD_ANSIBLE_VARS"
+
+step2_create_dc_objects:
+  stage: step2_create_dc_objects
+  when: on_success
+  allow_failure: false
+  script:
+    - echo "Waiting for management port to become available"
+    - sleep 20
+    - ansible-playbook -i ansible/hosts ansible/playbooks/2_configure_policy.yml -e "$CD_ANSIBLE_VARS"
+
+step3_create_dynamic_rules:
+  stage: step3_create_dynamic_rules
+  when: on_success
+  allow_failure: false
+  script:
+    - ansible-playbook -i ansible/hosts ansible/playbooks/3_add_new_epg.yml -e "$CD_ANSIBLE_VARS"
+  
+step4_create_static_rule:
+  stage: step4_create_static_rule
+  when: on_success
+  allow_failure: false
+  script:
+    - ansible-playbook -i ansible/hosts ansible/playbooks/4_classic_host_rule.yml -e "$CD_ANSIBLE_VARS"
+
+step999_teardown:
+  stage: step999_teardown
+  when: manual
+  allow_failure: false
+  script:
+    - ansible-playbook -i ansible/hosts ansible/playbooks/999_teardown.yml -e "$CD_ANSIBLE_VARS"

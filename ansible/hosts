@@ -1,0 +1,14 @@
+[chkpmds]
+172.23.23.19
+
+[chkpmds:vars]
+ansible_host=172.23.23.19
+ansible_httpapi_use_ssl=True
+ansible_httpapi_validate_certs=False
+ansible_network_os=check_point.mgmt.checkpoint
+ansible_api_key=E5ohePvX4Si93S838Eg4Mg==
+ansible_ssh_user=ansible
+ansible_ssh_pass=vpn123
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+ansible_checkpoint_domain=SJG_Test_Domain
+

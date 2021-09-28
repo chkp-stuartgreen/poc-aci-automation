@@ -1,0 +1,41 @@
+---
+- name: Check domain doesn't exist
+  gather_facts: no
+  hosts: chkpmds
+  tasks:
+    - name: 'Check for name conflict. New domain provided = {{ new_domain }}'
+      raw: 'mgmt_cli -r true show-domain name {{ new_domain }} --format json'
+      args:
+        executable: /bin/bash
+      register: dms_check_result
+      ignore_errors: yes
+
+    - name: 
+      debug:
+        msg: 'ERROR - The domain {{ new_domain }} already exists'
+      when: dms_check_result.stdout is not search("not found")
+    - meta: end_play
+      when: dms_check_result.stdout is not search("not found")
+
+
+- name: Create new domain
+  gather_facts: no
+  hosts: chkpmds
+  tasks:
+    - name: Creating new domain
+      raw: 'mgmt_cli -r true add domain name "{{ new_domain }}" servers.ip-address "{{ new_domain_ip }}" servers.name "{{ new_domain }}_Server" servers.multi-domain-server "MDM_5150_B" --format json'
+
+- name: Create VS within domain
+  gather_facts: no
+  hosts: chkpmds
+  tasks:
+    - name: Creating a new Virtual server
+      raw: 'mdsenv {{ new_domain }}_Server; vsx_provisioning_tool -s localhost -u {{ mds_user }} -p {{ mds_password }} -o add vd name {{ vs_name }} vsx {{ vsx_host_name }}, add interface name {{ vs_interface_dot_vlan }} ip {{ vs_ip_slash_masklength }}, add route destination default next_hop 192.168.1.254'
+
+- name: Add trusted client (GUI client to new domain)
+  hosts: chkpmds
+  gather_facts: no
+  tasks:
+    - name: Add trusted client
+      raw: 'mgmt_cli -r true set trusted-client name AnyHost domains-assignment.add {{ new_domain }} --domain "System Data"'
+
